@@ -12,7 +12,7 @@ export default defineConfig(({ mode }) => {
       preview: {
         host: '0.0.0.0',
         port: Number(process.env.PORT) || 3000,
-        allowedHosts: 'all'
+        allowedHosts: ['melodic-halimeda-athirtro-acf98886.koyeb.app']
       },
       plugins: [react()],
       define: {
