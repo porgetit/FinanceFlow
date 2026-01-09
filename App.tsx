@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { Session } from '@supabase/supabase-js';
 import { 
   Transaction, 
   TransactionType, 
@@ -7,6 +8,7 @@ import {
   FinancialStats 
 } from './types';
 import { CATEGORIES, ICONS } from './constants';
+import { supabaseClient } from './services/supabaseClient';
 import { supabase } from './services/supabaseService';
 import { 
   BarChart, 
@@ -77,6 +79,11 @@ const App: React.FC = () => {
   const [selectedDebtId, setSelectedDebtId] = useState<string | null>(null);
   const [currency, setCurrency] = useState<CurrencyType>('USD');
   const [isLoading, setIsLoading] = useState(true);
+  const [session, setSession] = useState<Session | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
+  const [loginData, setLoginData] = useState({ email: '', password: '' });
 
   // Form states
   const [formData, setFormData] = useState({
@@ -89,7 +96,25 @@ const App: React.FC = () => {
     paymentAmount: ''
   });
 
+  useEffect(() => {
+    let isMounted = true;
+    supabaseClient.auth.getSession().then(({ data }) => {
+      if (!isMounted) return;
+      setSession(data.session);
+      setAuthLoading(false);
+    });
+    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setAuthLoading(false);
+    });
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
   const fetchData = async () => {
+    if (!session) return;
     setIsLoading(true);
     try {
       const [txData, debtData] = await Promise.all([
@@ -111,13 +136,19 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    const init = async () => {
-      const savedCurrency = localStorage.getItem('ff_currency');
-      if (savedCurrency) setCurrency(savedCurrency as CurrencyType);
-      await fetchData();
-    };
-    init();
+    const savedCurrency = localStorage.getItem('ff_currency');
+    if (savedCurrency) setCurrency(savedCurrency as CurrencyType);
   }, []);
+
+  useEffect(() => {
+    if (!session) {
+      setTransactions([]);
+      setDebts([]);
+      setIsLoading(false);
+      return;
+    }
+    fetchData();
+  }, [session]);
 
   const currencySymbol = useMemo(() => {
     switch (currency) {
@@ -143,6 +174,27 @@ const App: React.FC = () => {
 
     return { totalBalance: income - expenses, totalIncome: income, totalExpenses: expenses, totalDebtToPay: toPay, totalDebtToReceive: toReceive };
   }, [transactions, debts]);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    setIsAuthSubmitting(true);
+    const { error } = await supabaseClient.auth.signInWithPassword({
+      email: loginData.email,
+      password: loginData.password
+    });
+    if (error) {
+      setAuthError(error.message);
+    }
+    setIsAuthSubmitting(false);
+  };
+
+  const handleLogout = async () => {
+    await supabaseClient.auth.signOut();
+    setTransactions([]);
+    setDebts([]);
+    setActiveTab('dashboard');
+  };
 
   const handleSaveTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -330,6 +382,82 @@ const App: React.FC = () => {
     { name: 'Gastos', value: stats.totalExpenses, color: '#ef4444' }
   ], [stats]);
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#fcfdfe]">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-slate-100 border-t-indigo-600 rounded-full animate-spin"></div>
+          <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.3em]">Cargando sesion</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return (
+      <div className="min-h-screen flex flex-col bg-[#fcfdfe]">
+        <header className="sticky top-0 z-[60] bg-white/80 backdrop-blur-2xl border-b border-slate-100">
+          <div className="max-w-6xl mx-auto px-6 h-20 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 bg-indigo-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-indigo-100">
+                <ICONS.Wallet />
+              </div>
+              <div>
+                <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none mb-1">FinanceFlow</h1>
+                <p className="text-[9px] text-slate-400 font-black uppercase tracking-[0.2em]">Acceso privado</p>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-1 flex items-center justify-center px-6 py-12">
+          <div className="w-full max-w-md bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8">
+            <div className="mb-8">
+              <h2 className="text-2xl font-black text-slate-900">Iniciar sesion</h2>
+              <p className="text-sm text-slate-400 font-medium mt-2">Ingresa con tu usuario y contrasena.</p>
+            </div>
+            <form onSubmit={handleLogin} className="space-y-6">
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Usuario</label>
+                <input
+                  type="email"
+                  autoComplete="username"
+                  value={loginData.email}
+                  onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
+                  className="w-full p-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-800 focus:ring-2 focus:ring-indigo-600 outline-none"
+                  placeholder="usuario@dominio.com"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Contrasena</label>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={loginData.password}
+                  onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
+                  className="w-full p-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-800 focus:ring-2 focus:ring-indigo-600 outline-none"
+                  placeholder="********"
+                  required
+                />
+              </div>
+              {authError && (
+                <p className="text-xs text-rose-500 font-bold">{authError}</p>
+              )}
+              <button
+                type="submit"
+                disabled={isAuthSubmitting}
+                className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black hover:bg-indigo-700 shadow-xl shadow-indigo-100 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isAuthSubmitting ? 'Ingresando...' : 'Ingresar'}
+              </button>
+            </form>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-[#fcfdfe]">
       <header className="sticky top-0 z-[60] bg-white/80 backdrop-blur-2xl border-b border-slate-100">
@@ -374,9 +502,12 @@ const App: React.FC = () => {
           </nav>
 
           <div className="flex items-center gap-4">
-             <button onClick={() => setActiveTab('config')} className="p-3 bg-slate-50 border border-slate-100 rounded-2xl text-slate-400 hover:text-indigo-600 transition-colors">
-               <ICONS.Settings />
-             </button>
+            <button onClick={() => setActiveTab('config')} className="p-3 bg-slate-50 border border-slate-100 rounded-2xl text-slate-400 hover:text-indigo-600 transition-colors">
+              <ICONS.Settings />
+            </button>
+            <button onClick={handleLogout} className="px-4 py-2 bg-slate-50 border border-slate-100 rounded-2xl text-slate-400 hover:text-rose-600 font-black text-xs uppercase tracking-widest transition-colors">
+              Salir
+            </button>
           </div>
         </div>
       </header>

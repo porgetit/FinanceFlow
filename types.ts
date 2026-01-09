@@ -11,6 +11,7 @@ export enum DebtType {
 
 export interface Transaction {
   id: string;
+  user_id?: string;
   amount: number;
   type: TransactionType;
   category: string;
@@ -20,6 +21,7 @@ export interface Transaction {
 
 export interface Debt {
   id: string;
+  user_id?: string;
   person: string;
   amount: number;
   paidAmount: number; // Added to support partial payments
